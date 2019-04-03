@@ -53,8 +53,9 @@ int main(int argc, char *argv[])
         printf("The command syntax as following:\n"
                "%s format [source_file [target_file [delimeter]]]\n"
                "\tformat: \"number{,number}+\"\n"
-               "\tdelimeter: default is \",\"\n",
-               argv[0]);
+               "\tdelimeter: default is \",\"\n"
+               "example: \n\t%s \"1,2\" source.txt target.txt \"|\"",
+               argv[0], argv[0]);
         exit(1);
         break;
     }
