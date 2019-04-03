@@ -1,0 +1,81 @@
+
+******************** test start *******************
+
+******************** test help message *******************
+The command syntax as following:
+./fileconvert format [source_file [target_file [delimeter]]]
+	format: "number{,number}+"
+	delimeter: default is ","
+
+
+******************** test empty file *******************
+stdin.txt
+
+stdout.txt
+
+
+
+******************** test one column file *******************
+stdin.txt
+12345
+abcde
+stdout.txt
+12345
+abcde
+
+
+******************** test two columns file *******************
+stdin.txt
+112
+121
+stdout.txt
+1,12
+1,21
+stdout.txt
+11,2
+12,1
+
+
+******************** test four columns file *******************
+stdin.txt
+1aa123
+123AA1
+stdout.txt
+1,aa,123
+1,23,AA1
+stdout.txt
+1a,a,123
+12,3,AA1
+stdout.txt
+1aa,12,3
+123,AA,1
+
+
+******************** test source file *******************
+source.txt
+1aa123
+source.txt
+stdout.txt
+stdout.txt
+1a,a1,23
+
+
+******************** test source and target file *******************
+source.txt
+1aa123
+source.txt
+target.txt
+target.txt
+1a,a1,23
+
+
+******************** test source and target file *******************
+source.txt
+1aa123
+1aa123
+source.txt
+target.txt
+target.txt
+1aa|12|3
+1aa|12|3
+
