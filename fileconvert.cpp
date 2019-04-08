@@ -14,28 +14,29 @@ typedef struct tagRow
 
 typedef struct tagBuffer
 {
-    int  size;
-    int  maxsize;
-    int  rowsize;
-    int  rowcnt;
-    char data[0];
+    size_t size;
+    size_t maxsize;
+    long   rowsize;
+    long   rowcnt;
+    char   data[0];
 }Buffer;
+
 
 // file operator
 FILE   *file_open(char *filepath, char *mode);
 long    file_read(FILE *stream, Buffer *buffer);
 long    file_write(FILE *stream, Buffer *buffer);
-long    file_get_size(FILE *stream);
+size_t  file_get_size(FILE *stream);
 void    file_close(FILE *stream);
 
 Row    *analyze_columns_size(char *format);
-Buffer *alloc_buffer(Row *row, long size);
+Buffer *alloc_buffer(Row *row, size_t size);
 
 void    convert_buffer_data(Buffer *sourceBuf, Buffer *targetBuf, Row *row);
-char   *convert_one_row(char *buffer, long size, char **columns, int *colnum);
+void    convert_one_row(char *source, char *target, Row *row);
 
 #define DEFAULT_COLUMNS        1024
-#define BUFFER_SIZE            (1024*1024*1024)
+#define BUFFER_SIZE            (1024*1024*1024L)
 
 int main(int argc, char *argv[])
 {
@@ -48,8 +49,8 @@ int main(int argc, char *argv[])
     char    delimeter = ',';
     char   *format = NULL;
 
-    long    filesize = 0;
-    long    bufsize = BUFFER_SIZE;
+    size_t  filesize = 0;
+    size_t  bufsize = BUFFER_SIZE;
     int     batch = 0;
     int     batchcnt = 0;
     Buffer *sourceBuf = NULL;
@@ -71,14 +72,16 @@ int main(int argc, char *argv[])
     case 2:
         format = argv[1];
         printf("[INFO] the source file [%s], target file [%s], format [%s], "
-               "delimeter [%c]\n", sourceFile, targetFile, format, delimeter);
+               "delimeter [%c] buffer size [%lld]\n", 
+               sourceFile, targetFile, format, delimeter, bufsize);
         break;
 
     default:
         printf("The command syntax as following:\n"
-               "%s format [source_file [target_file [delimeter]]]\n"
+               "%s format [source_file [target_file [delimeter [buffersize]]]]\n"
                "\tformat: \"number{,number}+\"\n"
                "\tdelimeter: default is \",\"\n"
+               "\tbuffersize: n(GB)"
                "example: \n\t%s \"1,2\" source.txt target.txt \"|\"\n",
                argv[0], argv[0]);
         exit(1);
@@ -102,7 +105,10 @@ int main(int argc, char *argv[])
         bufsize = filesize;
     sourceBuf = alloc_buffer(row, bufsize);
     sourceBuf->rowcnt = bufsize/sourceBuf->rowsize;
-    batchcnt = filesize/bufsize;
+    batchcnt = (filesize + bufsize - 1)/bufsize;
+
+    printf("[INFO] file [%s] size [%lld], batch count [%d]\n",
+           sourceFile, filesize, batchcnt);
     
     targetBuf = alloc_buffer(row, 
                              bufsize + (row->colcnt-1) * sourceBuf->rowcnt);
@@ -118,7 +124,7 @@ int main(int argc, char *argv[])
         filesize -= sourceBuf->size;
 
         file_read(source, sourceBuf);
-        printf("[INFO] read data start batch [%d], batch size [%d]\n",
+        printf("[INFO] read data start batch [%d], batch size [%lld]\n",
                batch++, sourceBuf->size);
 
         convert_buffer_data(sourceBuf, targetBuf, row);
@@ -169,10 +175,10 @@ error:
 Row *analyze_columns_size(char *format)
 {
     int   size = sizeof(Row) + (DEFAULT_COLUMNS + 1) * sizeof(int);
+    int   collen = 0;
     Row  *row = NULL;
     char *start = format;
     char *cur = format;
-    int   collen = 0;
 
     printf("[INFO] column format [%s]\n", format);
 
@@ -218,7 +224,7 @@ Row *analyze_columns_size(char *format)
     return row;
 }
 
-Buffer *alloc_buffer(Row *row, long size)
+Buffer *alloc_buffer(Row *row, size_t size)
 {
     Buffer *sourceBuf = (Buffer*)malloc(sizeof(Buffer) + size);
 
@@ -282,9 +288,9 @@ void convert_buffer_data(Buffer *sourceBuf, Buffer *targetBuf, Row *row)
            sourceBuf, rowid, row->colcnt);
 }
 
-long file_get_size(FILE *stream)
+size_t file_get_size(FILE *stream)
 {
-    long  size = 0;
+    size_t  size = 0;
 
     if (fseek(stream, 0, SEEK_END))
     {

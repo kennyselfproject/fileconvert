@@ -3,10 +3,10 @@
 
 ******************** test help message *******************
 The command syntax as following:
-./fileconvert format [source_file [target_file [delimeter]]]
+./fileconvert format [source_file [target_file [delimeter [buffersize]]]]
 	format: "number{,number}+"
 	delimeter: default is ","
-example: 
+	buffersize: n(GB)example: 
 	./fileconvert "1,2" source.txt target.txt "|"
 
 ******************** test empty file *******************
