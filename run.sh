@@ -6,9 +6,10 @@ EXECUTELOG=execute.log
 INPUTFILE=stdin.txt
 OUTPUTFILE=stdout.txt
 
-rm -f $EXEFILE *.txt *~ a.out core.* $EXECUTELOG $LOGFILE
+rm -f $EXEFILE *.txt *~ a.out core.* $EXECUTELOG $LOGFILE *.tar.gz
 if [ "x$1" = "xrelease" ]; then
     gcc -O2 fileconvert.cpp -o $EXEFILE
+    tar zcvf $EXEFILE.tar.gz $EXEFILE
 else
     gcc -g3 fileconvert.cpp -o $EXEFILE
 fi
@@ -23,7 +24,6 @@ printmsg "test start"
 printmsg "test help message"
 ./$EXEFILE 2>&1 >> $LOGFILE
 ls -l | grep "\.txt" 2>&1 >> $LOGFILE
-echo "" >>  $LOGFILE
 
 printmsg "test empty file"
 echo "" > $INPUTFILE

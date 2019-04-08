@@ -5,35 +5,55 @@
 
 typedef struct tagRow
 {
-    int  cols;
+    int  colcnt;
     int  colmax;
-    int  rowlen;
+    int  rowsize;
     char delimeter;
     int  colslen[0];
 }Row;
 
-char *read_data_from_file(char *filepath, long *size);
-long  write_data_to_file(char *filepath, char *data, long size);
-Row  *analyze_columns_size(char *format);
-void  handle_data_in_buffer(char *buffer, char *cache, Row *row, int rowcount);
-char *handle_one_row_in_buffer(
-        char *buffer, long size, char **columns, int *colnum);
+typedef struct tagBuffer
+{
+    int  size;
+    int  maxsize;
+    int  rowsize;
+    int  rowcnt;
+    char data[0];
+}Buffer;
+
+// file operator
+FILE   *file_open(char *filepath, char *mode);
+long    file_read(FILE *stream, Buffer *buffer);
+long    file_write(FILE *stream, Buffer *buffer);
+long    file_get_size(FILE *stream);
+void    file_close(FILE *stream);
+
+Row    *analyze_columns_size(char *format);
+Buffer *alloc_buffer(Row *row, long size);
+
+void    convert_buffer_data(Buffer *sourceBuf, Buffer *targetBuf, Row *row);
+char   *convert_one_row(char *buffer, long size, char **columns, int *colnum);
 
 #define DEFAULT_COLUMNS        1024
+#define BUFFER_SIZE            (1024*1024*1024)
 
 int main(int argc, char *argv[])
 {
-    char *sourceFile = (char*)"stdin.txt";
-    char *targetFile = (char*)"stdout.txt";
-    char  delimeter = ',';
-    char *format = NULL;
+    char   *sourceFile = (char*)"stdin.txt";
+    char   *targetFile = (char*)"stdout.txt";
+    FILE   *source = NULL;
+    FILE   *target = NULL;
 
-    long  filesize = 0;
-    long  cachesize = 0;
-    int   rowcount = 0;
-    char *buffer = NULL;
-    char *cache = NULL;
-    Row  *row;
+    char    delimeter = ',';
+    char   *format = NULL;
+
+    long    filesize = 0;
+    long    bufsize = BUFFER_SIZE;
+    int     rowcount = 0;
+    int     batch = 0;
+    Buffer *sourceBuf = NULL;
+    Buffer *targetBuf = NULL;
+    Row    *row = NULL;
 
     switch(argc)
     {
@@ -54,45 +74,81 @@ int main(int argc, char *argv[])
                "%s format [source_file [target_file [delimeter]]]\n"
                "\tformat: \"number{,number}+\"\n"
                "\tdelimeter: default is \",\"\n"
-               "example: \n\t%s \"1,2\" source.txt target.txt \"|\"",
+               "example: \n\t%s \"1,2\" source.txt target.txt \"|\"\n",
                argv[0], argv[0]);
         exit(1);
         break;
     }
 
-    buffer = read_data_from_file(sourceFile, &filesize);
-    if (buffer == NULL)
-        goto error;
-
     row = analyze_columns_size(format);
     row->delimeter = delimeter;
 
-    rowcount = filesize/row->rowlen;
-    cachesize = filesize + rowcount * (row->cols - 1);
-    cache = (char*)malloc(cachesize);
+    printf("[INFO] file [%s], columns [%s], format [%s], "
+           "delimeter [%c]\n", sourceFile, targetFile, format, delimeter);
 
-    if (filesize < row->rowlen)
+
+    source = file_open(sourceFile, (char*)"r");
+    target = file_open(targetFile, (char*)"w");
+    if (source == NULL || target == NULL)
+        goto error;
+
+    filesize = file_get_size(source);
+    
+    if (filesize < bufsize)
+        bufsize = filesize;
+    sourceBuf = alloc_buffer(row, bufsize);
+    sourceBuf->rowcnt = bufsize/sourceBuf->rowsize;
+    
+    targetBuf = alloc_buffer(row, 
+                             bufsize + (row->colcnt-1) * sourceBuf->rowcnt);
+    targetBuf->rowsize += (row->colcnt - 1);
+    targetBuf->rowcnt = sourceBuf->rowcnt;
+
+    while(filesize >= row->rowsize)
     {
-        cache[0] = '\n';
-        cachesize = 1;
+        sourceBuf->size = sourceBuf->rowcnt * sourceBuf->rowsize;
+
+        if (filesize < sourceBuf->size)
+            sourceBuf->size = filesize;
+        filesize -= sourceBuf->size;
+
+        file_read(source, sourceBuf);
+        printf("[INFO] read data start batch [%d], batch size [%d]\n",
+               batch++, sourceBuf->size);
+
+        convert_buffer_data(sourceBuf, targetBuf, row);
+
+        file_write(target, targetBuf);
     }
-
-    handle_data_in_buffer(buffer, cache, row, rowcount);
-
-    write_data_to_file(targetFile, cache, cachesize);
 
 error:
-    if (buffer != NULL)
+    if (source != NULL)
     {
-        free(buffer);
-        buffer = NULL;
+        file_close(source);
+        source = NULL;
     }
 
-    if (cache != NULL)
+    if (target != NULL)
     {
-        free(cache);
-        cache = NULL;
+        file_close(target);
+        target = NULL;
     }
+
+    if (sourceBuf != NULL)
+    {
+        free(sourceBuf);
+        sourceBuf = NULL;
+    }
+
+    if (targetBuf != NULL)
+    {
+        free(targetBuf);
+        targetBuf = NULL;
+    }
+
+    printf("[INFO] convert file [%s] finished, the target file [%s]\n\n",
+           sourceFile, targetFile);
+
 
     return 0;
 }
@@ -117,7 +173,7 @@ Row *analyze_columns_size(char *format)
         {
         case ',':
         {
-            if (row->cols >= row->colmax)
+            if (row->colcnt >= row->colmax)
             {
                 int newsize = sizeof(Row) + (2 * row->colmax + 1) * sizeof(int);
                 Row *newrow = (Row*)malloc(newsize);
@@ -127,9 +183,9 @@ Row *analyze_columns_size(char *format)
             }
         
             collen = atoi(start);
-            row->colslen[row->cols] = collen;
-            row->rowlen += collen;
-            row->cols++;
+            row->colslen[row->colcnt] = collen;
+            row->rowsize += collen;
+            row->colcnt++;
             start = cur;
         }
         break;
@@ -140,160 +196,155 @@ Row *analyze_columns_size(char *format)
     }
 
     collen = atoi(start);
-    row->colslen[row->cols] = collen;
-    row->rowlen += collen;
-    row->cols++;
+    row->colslen[row->colcnt] = collen;
+    row->rowsize += collen + 1;
+    row->colcnt++;
 
-    printf("[INFO] columns [%d] total rowlen [%d]\n", row->cols, row->rowlen);
+    printf("[INFO] columns [%d] total rowsize [%d]\n", row->colcnt, row->rowsize);
 
     return row;
 }
 
-void handle_one_row_in_buffer(char *buffer, char *cache, Row *row)
+Buffer *alloc_buffer(Row *row, long size)
 {
-    char *curbuf = buffer;
-    char *curcache = cache;
+    Buffer *sourceBuf = (Buffer*)malloc(sizeof(Buffer) + size);
+
+    sourceBuf->size = 0;
+    sourceBuf->maxsize = size;
+    sourceBuf->rowsize = row->rowsize;
+    sourceBuf->rowcnt = -1;
+
+    return sourceBuf;
+}
+
+void convert_one_row(char *source, char *target, Row *row)
+{
+    char *cursource = source;
+    char *curtarget = target;
     char  delimeter = row->delimeter;
     
     int   col = 0;
     int   collen = 0;
     int  *colslen = row->colslen;
     
-    for (col = 0; col < row->cols; col++)
+    for (col = 0; col < row->colcnt; col++)
     {
         collen = colslen[col];
-        memcpy(curcache, curbuf, collen);
-        curcache[collen] = delimeter;
-        curbuf += collen;
-        curcache += collen + 1;
+        memcpy(curtarget, cursource, collen);
+        curtarget[collen] = delimeter;
+        cursource += collen;
+        curtarget += collen + 1;
     }
-    cache[row->rowlen + row->cols - 1] = '\n';
+
+    target[row->rowsize + row->colcnt - 2] = '\n';
 }
 
-void handle_data_in_buffer(char *buffer, char *cache, Row *row, int rowcount)
+void convert_buffer_data(Buffer *sourceBuf, Buffer *targetBuf, Row *row)
 {
     int   rowid = 0;
-    int   rowlen = row->rowlen + 1;
-    int   cols = row->cols - 1;
-    char *curbuf = buffer;
-    char *curcache = cache;
+    int   rowsize = row->rowsize;
+    int   colcnt = row->colcnt - 1;
+    int   rowcnt = sourceBuf->size/rowsize;
+    char *source = sourceBuf->data;
+    char *target = targetBuf->data;
 
-    printf("[INFO] handle the buffer [%p] start, rows [%d], cache [%p]\n", 
-           buffer, rowcount, cache);
-    for (rowid = 0; rowid < rowcount; rowid++)
+    printf("[INFO] handle the buffer [%p] start, rows [%d], target buffer [%p]\n", 
+           sourceBuf, rowcnt, targetBuf);
+
+    targetBuf->size = 0;
+    for (rowid = 0; rowid < rowcnt; rowid++)
     {
-        handle_one_row_in_buffer(curbuf, curcache, row);
-#ifdef _DEBUG_
-        printf("[INFO] row [%d], buffer [%p], cache [%p]\n", 
-               rowid, curbuf, curcache);
-#endif
-        curbuf += rowlen;
-        curcache += rowlen + cols;
+        convert_one_row(source, target, row);
+
+        if (*(source + rowsize - 1) != '\n')
+            printf("[ERROR] row [%d], buffer [%s], target buffer [%p]\n", 
+                   rowid, source, target);
+        source += rowsize;
+        target += rowsize + colcnt;
     }
 
-    printf("[INFO] handle the buffer [%p] succeed, rows [%d], columns[%d]\n", 
-           buffer, rowcount, row->cols);
+    targetBuf->size = (target - targetBuf->data);
+
+    printf("[INFO] handle the buffer [%p] succeed, rows [%ld], columns[%d]\n", 
+           sourceBuf, rowid, row->colcnt);
 }
 
-char *read_data_from_file(char *filepath, long *size)
+long file_get_size(FILE *stream)
 {
-    FILE *stream = NULL;
-    long  filesize = 0;
-    char *buffer = NULL;
+    long  size = 0;
 
-    if (size != NULL)
-        *size = 0;
-
-    printf("[INFO] open file [%s]\n", filepath);
-    if((stream = fopen(filepath,"r")) == NULL)
-    {
-        printf("[ERROR] open file [%s] fail, errno:%d\n", 
-               filepath, errno);
-        goto error;
-    }
-
-    printf("[INFO] get file [%s] size\n", filepath);
     if (fseek(stream, 0, SEEK_END))
     {
-        printf("[ERROR] file [%s] fseek end with error [%d]\n", filepath, errno);
-        goto error;
-    }
-    filesize = ftell(stream);
-    if (fseek(stream, 0, SEEK_SET))
-    {
-        printf("[ERROR] file [%s] fseek head with error [%d]\n", filepath, errno);
-        goto error;
-    }
-    printf("[INFO] the file [%s] size [%ld]\n", filepath, filesize);
-
-    printf("[INFO] malloc memory buffer size [%ld]\n", filesize);
-    buffer = (char*)malloc(filesize + 10);
-    printf("[INFO] the memory buffer [%p——%p]\n", buffer, buffer + filesize);
-
-    printf("[INFO] read data from file [%s] size [%ld]\n", 
-           filepath, filesize);
-    if (fread(buffer, filesize, 1, stream) != 1)
-    {
-        printf("[INFO] read file [%s] with error[%d]\n", 
-               filepath, errno);
-        goto error;
-    }
-
-    printf("[INFO] read file [%s] is closed\n", filepath);
-    fclose(stream);
-    if (size != NULL)
-        *size = filesize;
-
-    return buffer;
-
-error:
-    if (buffer != NULL)
-    {
-        free(buffer);
-        buffer = NULL;
-    }
-
-    if (stream != NULL)
-    {
-        printf("[INFO] read file [%s] is closed\n", filepath);
-        fclose(stream);
-    }
-
-    return NULL;
-}
-
-long  write_data_to_file(char *filepath, char *data, long size)
-{
-    FILE *stream = NULL;
-
-    printf("[INFO] open file [%s] to write\n", filepath);
-    if((stream = fopen(filepath,"w")) == NULL)
-    {
-        printf("[ERROR] open file [%s] to write fail, errno:%d\n", 
-               filepath, errno);
+        printf("[ERROR] file [%p] fseek end with error [%d]\n", stream, errno);
         return -1;
     }
 
-    printf("[INFO] write data [%p] to file [%s] size [%ld]\n", 
-           data, filepath, size);
-    if (fwrite(data, size, 1, stream) != 1)
+    size = ftell(stream);
+    if (fseek(stream, 0, SEEK_SET))
     {
-        printf("[INFO] write file [%s] with error[%d]\n", 
-               filepath, errno);
-        goto error;
+        printf("[ERROR] file [%p] fseek head with error [%d]\n", stream, errno);
+        return -1;
     }
-
-    printf("[INFO] write file [%s] is closed\n", filepath);
-    fclose(stream);
 
     return size;
+}
 
-error:
-    if (stream != NULL)
+FILE *file_open(char *filepath, char *mode)
+{
+    FILE *stream = NULL;
+
+    printf("[INFO] open file [%s]\n", filepath);
+    if((stream = fopen(filepath, mode)) == NULL)
     {
-        printf("[INFO] write file [%s] is closed\n", filepath);
-        fclose(stream);
+        printf("[ERROR] open file [%s] fail, errno:%d\n", 
+               filepath, errno);
     }
 
-    return 0;
+    return stream;
+}
+
+long file_read(FILE *stream, Buffer *buffer)
+{
+    long size = 0; 
+
+#ifdef _DEBUG_
+    printf("[INFO] read data from file [%p] size [%ld]\n", stream, size);
+#endif
+
+    size = fread(buffer->data, buffer->size, 1, stream);
+    if (size != 1)
+    {
+        printf("[ERROR] read file [%p] with error[%d]\n", stream, errno);
+    }
+
+    return size;
+}
+
+long  file_write(FILE *stream, Buffer *buffer)
+{
+    long size = 0;
+
+#ifdef _DEBUG_
+    printf("[INFO] write data [%p] to file [%p], size [%ld]\n", 
+           buffer->data, stream, buffer->size);
+#endif
+
+    size = fwrite(buffer->data, buffer->size, 1, stream);
+    if (size != 1)
+    {
+        printf("[ERROR] write file [%p] with error[%d]\n", stream, errno);
+    }
+
+    return size;
+}
+
+void  file_close(FILE *stream)
+{
+    if (stream != NULL)
+    {
+#ifdef _DEBUG_
+        printf("[INFO] file [%p] is closed\n", stream);
+#endif
+        fclose(stream);
+    }
 }
