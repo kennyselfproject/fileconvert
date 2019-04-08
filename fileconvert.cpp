@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
 {
     char   *sourceFile = (char*)"stdin.txt";
     char   *targetFile = (char*)"stdout.txt";
+    char    targetPath[128];
     FILE   *source = NULL;
     FILE   *target = NULL;
 
@@ -49,14 +50,18 @@ int main(int argc, char *argv[])
 
     long    filesize = 0;
     long    bufsize = BUFFER_SIZE;
-    int     rowcount = 0;
     int     batch = 0;
+    int     batchcnt = 0;
     Buffer *sourceBuf = NULL;
     Buffer *targetBuf = NULL;
     Row    *row = NULL;
 
     switch(argc)
     {
+    case 6:
+        bufsize = atoi(argv[5]) * BUFFER_SIZE;
+        if (bufsize < BUFFER_SIZE)
+            bufsize = BUFFER_SIZE;
     case 5:
         delimeter = (char)argv[4][0];
     case 4:
@@ -88,8 +93,7 @@ int main(int argc, char *argv[])
 
 
     source = file_open(sourceFile, (char*)"r");
-    target = file_open(targetFile, (char*)"w");
-    if (source == NULL || target == NULL)
+    if (source == NULL)
         goto error;
 
     filesize = file_get_size(source);
@@ -98,6 +102,7 @@ int main(int argc, char *argv[])
         bufsize = filesize;
     sourceBuf = alloc_buffer(row, bufsize);
     sourceBuf->rowcnt = bufsize/sourceBuf->rowsize;
+    batchcnt = filesize/bufsize;
     
     targetBuf = alloc_buffer(row, 
                              bufsize + (row->colcnt-1) * sourceBuf->rowcnt);
@@ -117,6 +122,14 @@ int main(int argc, char *argv[])
                batch++, sourceBuf->size);
 
         convert_buffer_data(sourceBuf, targetBuf, row);
+
+        if (batchcnt > 1)
+            sprintf(targetPath, "%s.%d", targetFile, batch);
+        else 
+            sprintf(targetPath, "%s", targetFile);
+        target = file_open(targetPath, (char*)"w");
+        if (target == NULL)
+            goto error;
 
         file_write(target, targetBuf);
     }

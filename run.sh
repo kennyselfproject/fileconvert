@@ -31,7 +31,6 @@ echo "$INPUTFILE" >> $LOGFILE
 cat $INPUTFILE >> $LOGFILE
 ./$EXEFILE "2"  2>&1 >> $EXECUTELOG
 echo "$OUTPUTFILE" >> $LOGFILE
-cat $OUTPUTFILE >> $LOGFILE
 echo "" >>  $LOGFILE
 
 printmsg "test one column file"
